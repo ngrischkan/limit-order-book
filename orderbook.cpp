@@ -9,7 +9,8 @@
 #include <cmath>
 #include <chrono>
 
-const double NO_ASK = std::numeric_limits<double>::max();
+const int NO_ASK = std::numeric_limits<int>::max();
+const double CANCEL_DIST = 1000;
 
 struct Order
 {
@@ -28,6 +29,12 @@ struct Trade
     double mid;
 };
 
+struct Book
+{
+    std::map<int, std::vector<Order>> bids;
+    std::map<int, std::vector<Order>> asks;
+};
+
 void print_order(const Order &o)
 {
     std::string buy_or_sell_string = "";
@@ -42,38 +49,35 @@ void print_order(const Order &o)
     std::cout << "#" << o.id << " " << buy_or_sell_string << " " << o.quantity << " @ " << o.price << std::endl;
 }
 
-double get_best_bid(const std::vector<Order> &orders)
+int get_best_bid(const Book &book)
 {
-    double best_bid = 0;
-    for (const Order &o : orders)
+    if (book.bids.empty())
     {
-        if (o.is_buy && o.price > best_bid)
-        {
-            best_bid = o.price;
-        }
+        return 0;
     }
-    return best_bid;
+    else
+    {
+        return book.bids.rbegin()->first;
+    }
 }
 
-double get_best_ask(const std::vector<Order> &orders)
+int get_best_ask(const Book &book)
 {
-    double best_ask = NO_ASK;
-    for (const Order &o : orders)
+    if (book.asks.empty())
     {
-        if (!o.is_buy && o.price < best_ask)
-        {
-
-            best_ask = o.price;
-        }
+        return NO_ASK;
     }
-    return best_ask;
+    else
+    {
+        return book.asks.begin()->first;
+    }
 }
 
-void print_summary(const std::vector<Order> &book)
+void print_summary(const Book &book)
 {
-    double best_bid = get_best_bid(book);
-    double best_ask = get_best_ask(book);
-    double spread = best_ask - best_bid;
+    int best_bid = get_best_bid(book);
+    int best_ask = get_best_ask(book);
+    int spread = best_ask - best_bid;
     if (best_bid == 0)
     {
         std::cout << "Best Bid: none" << std::endl;
@@ -100,98 +104,70 @@ void print_summary(const std::vector<Order> &book)
     }
 }
 
-int find_best_ask_index(const std::vector<Order> &book)
+void add_order(Book &book, const Order &o, std::vector<Trade> &trades, double mid)
 {
-    double best_ask = NO_ASK;
-    int best_index = -1;
-
-    for (int i = 0; i < book.size(); i++)
-    {
-        const Order &o = book[i];
-
-        if (!o.is_buy && o.price < best_ask)
-        {
-            best_ask = o.price;
-            best_index = i;
-        }
-    }
-    return best_index;
-}
-
-int find_best_bid_index(const std::vector<Order> &book)
-{
-    double best_bid = 0;
-    int best_index = -1;
-
-    for (int i = 0; i < book.size(); i++)
-    {
-        const Order &o = book[i];
-
-        if (o.is_buy && o.price > best_bid)
-        {
-            best_bid = o.price;
-            best_index = i;
-        }
-    }
-    return best_index;
-}
-
-void add_order(std::vector<Order> &book, const Order &o, std::vector<Trade> &trades, double mid)
-{
-    // std::cout << "--- new ";
-    // print_order(o);
     Order incoming = o;
-
     if (incoming.is_buy)
     {
-        while (incoming.quantity > 0)
+        while (incoming.quantity > 0 && !book.asks.empty())
         {
-            int ask_index = find_best_ask_index(book);
-            if (ask_index == -1 || incoming.price < book[ask_index].price)
+            int best_price = book.asks.begin()->first;
+            if (incoming.price < best_price)
             {
                 break;
             }
+            std::vector<Order> &level = book.asks[best_price];
+            Order &resting = level.front();
 
-            int trade_qty = std::min(incoming.quantity, book[ask_index].quantity);
-            // std::cout << "TRADE: " << trade_qty << " @ " << book[ask_index].price
-            //<< " (#" << incoming.id << " with #" << book[ask_index].id << ")" << std::endl;
-            Trade trade = {incoming.id, book[ask_index].id, book[ask_index].price, trade_qty, mid};
-            trades.push_back(trade);
-            book[ask_index].quantity -= trade_qty;
-            if (book[ask_index].quantity == 0)
-            {
-                book.erase(book.begin() + ask_index);
-            }
+            int trade_qty = std::min(incoming.quantity, resting.quantity);
+            trades.push_back({incoming.id, resting.id, best_price, trade_qty, mid});
+            resting.quantity -= trade_qty;
             incoming.quantity -= trade_qty;
+
+            if (resting.quantity == 0)
+            {
+                level.erase(level.begin());
+            }
+            if (level.empty())
+            {
+                book.asks.erase(best_price);
+            }
+        }
+        if (incoming.quantity > 0)
+        {
+            book.bids[incoming.price].push_back(incoming);
         }
     }
     else
     {
-        while (incoming.quantity > 0)
+        while (incoming.quantity > 0 && !book.bids.empty())
         {
-            int bid_index = find_best_bid_index(book);
-            if (bid_index == -1 || incoming.price > book[bid_index].price)
+            int best_price = book.bids.rbegin()->first;
+            if (incoming.price > best_price)
             {
                 break;
             }
+            std::vector<Order> &level = book.bids[best_price];
+            Order &resting = level.front();
 
-            int trade_qty = std::min(incoming.quantity, book[bid_index].quantity);
-            // std::cout << "TRADE: " << trade_qty << " @ " << book[bid_index].price
-            //<< " (#" << incoming.id << " with #" << book[bid_index].id << ")" << std::endl;
-            Trade trade = {book[bid_index].id, incoming.id, book[bid_index].price, trade_qty, mid};
-            trades.push_back(trade);
-            book[bid_index].quantity -= trade_qty;
-            if (book[bid_index].quantity == 0)
-            {
-                book.erase(book.begin() + bid_index);
-            }
+            int trade_qty = std::min(incoming.quantity, resting.quantity);
+            trades.push_back({resting.id, incoming.id, best_price, trade_qty, mid});
+            resting.quantity -= trade_qty;
             incoming.quantity -= trade_qty;
-        }
-    }
 
-    if (incoming.quantity > 0)
-    {
-        book.push_back(incoming);
+            if (resting.quantity == 0)
+            {
+                level.erase(level.begin());
+            }
+            if (level.empty())
+            {
+                book.bids.erase(best_price);
+            }
+        }
+        if (incoming.quantity > 0)
+        {
+            book.asks[incoming.price].push_back(incoming);
+        }
     }
 }
 
@@ -205,20 +181,43 @@ void write_csv(const std::vector<Trade> &trades)
     }
 }
 
-void cancel_stale(std::vector<Order> &book, double mid)
+void cancel_stale(Book& book, double mid)
 {
-    for (int i = book.size() - 1; i >= 0; i--)
+    while (!book.asks.empty() && std::abs(book.asks.begin()->first / 100.0 - mid) > CANCEL_DIST)
     {
-        if (std::abs(book[i].price / 100.0 - mid) > 0.5)
-        {
-            book.erase(book.begin() + i);
-        }
+        book.asks.erase(book.asks.begin());
     }
+    while (!book.asks.empty() && std::abs(book.asks.rbegin()->first / 100.0 - mid) > CANCEL_DIST)
+    {
+        book.asks.erase(std::prev(book.asks.end()));
+    }
+    while (!book.bids.empty() && std::abs(book.bids.begin()->first / 100.0 - mid) > CANCEL_DIST)
+    {
+        book.bids.erase(book.bids.begin());
+    }
+    while (!book.bids.empty() && std::abs(book.bids.rbegin()->first / 100.0 - mid) > CANCEL_DIST)
+    {
+        book.bids.erase(std::prev(book.bids.end()));
+    }
+}
+
+int count_resting(const Book &book)
+{
+    int count = 0;
+    for (const auto &[price, orders] : book.bids)
+    {
+        count += orders.size();
+    }
+    for (const auto &[price, orders] : book.asks)
+    {
+        count += orders.size();
+    }
+    return count;
 }
 
 int main()
 {
-    std::vector<Order> book;
+    Book book;
     std::vector<Trade> trades;
     std::mt19937 rng(42);
     std::bernoulli_distribution side_dist(0.5);
@@ -248,6 +247,6 @@ int main()
     print_summary(book);
     std::cout << "Trades: " << trades.size() << std::endl;
     write_csv(trades);
-    std::cout << "Resting orders: " << book.size() << std::endl;
+    std::cout << "Resting orders: " << count_resting(book) << std::endl;
     return 0;
 }
