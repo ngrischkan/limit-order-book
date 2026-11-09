@@ -1,4 +1,5 @@
 #include <iostream>
+#include <map>
 #include <vector>
 #include <string>
 #include <limits>
@@ -6,6 +7,7 @@
 #include <fstream>
 #include <random>
 #include <cmath>
+#include <chrono>
 
 const double NO_ASK = std::numeric_limits<double>::max();
 
@@ -13,7 +15,7 @@ struct Order
 {
     int id;
     bool is_buy;
-    double price;
+    int price;
     int quantity;
 };
 
@@ -21,7 +23,7 @@ struct Trade
 {
     int buy_id;
     int sell_id;
-    double price;
+    int price;
     int quantity;
     double mid;
 };
@@ -78,7 +80,7 @@ void print_summary(const std::vector<Order> &book)
     }
     else
     {
-        std::cout << "Best Bid: " << best_bid << std::endl;
+        std::cout << "Best Bid: " << best_bid / 100.0 << std::endl;
     }
     if (best_ask == NO_ASK)
     {
@@ -86,7 +88,7 @@ void print_summary(const std::vector<Order> &book)
     }
     else
     {
-        std::cout << "Best Ask: " << best_ask << std::endl;
+        std::cout << "Best Ask: " << best_ask / 100.0 << std::endl;
     }
     if (best_bid == 0 || best_ask == NO_ASK)
     {
@@ -94,7 +96,7 @@ void print_summary(const std::vector<Order> &book)
     }
     else
     {
-        std::cout << "Spread: " << spread << std::endl;
+        std::cout << "Spread: " << spread / 100.0 << std::endl;
     }
 }
 
@@ -199,7 +201,7 @@ void write_csv(const std::vector<Trade> &trades)
     file << "buy_id,sell_id,price,quantity,mid" << std::endl;
     for (const Trade &t : trades)
     {
-        file << t.buy_id << "," << t.sell_id << "," << t.price << "," << t.quantity << "," << t.mid << std::endl;
+        file << t.buy_id << "," << t.sell_id << "," << t.price / 100.0 << "," << t.quantity << "," << t.mid << std::endl;
     }
 }
 
@@ -207,7 +209,7 @@ void cancel_stale(std::vector<Order> &book, double mid)
 {
     for (int i = book.size() - 1; i >= 0; i--)
     {
-        if (std::abs(book[i].price - mid) > 0.5)
+        if (std::abs(book[i].price / 100.0 - mid) > 0.5)
         {
             book.erase(book.begin() + i);
         }
@@ -224,20 +226,25 @@ int main()
     std::normal_distribution<double> step_dist(0.0, 0.05);
     std::uniform_int_distribution<int> qty_dist(1, 20);
     double mid = 100.0;
-    int num_orders = 5000;
+    int num_orders = 100000;
+    auto start = std::chrono::high_resolution_clock::now();
     for (int i = 1; i <= num_orders; i++)
     {
         mid += step_dist(rng);
         double p = price_dist(rng) + mid;
+        int price_ticks = static_cast<int>(std::round(p * 100));
         Order o = {
             i,
             side_dist(rng),
-            std::round(p * 100) / 100,
+            price_ticks,
             qty_dist(rng),
         };
         add_order(book, o, trades, mid);
         cancel_stale(book, mid);
     }
+    auto end = std::chrono::high_resolution_clock::now();
+    double ms = std::chrono::duration<double, std::milli>(end - start).count();
+    std::cout << "Time: " << ms << " ms" << std::endl;
     print_summary(book);
     std::cout << "Trades: " << trades.size() << std::endl;
     write_csv(trades);
