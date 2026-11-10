@@ -10,7 +10,7 @@
 #include <chrono>
 
 const int NO_ASK = std::numeric_limits<int>::max();
-const double CANCEL_DIST = 1000;
+const double CANCEL_DIST = 1;
 
 struct Order
 {

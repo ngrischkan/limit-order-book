@@ -1,4 +1,7 @@
 orderbook
 *.csv
 .DS_Store
+old_orderbook
 old_orderbook.cpp
+map_practice
+map_practice.cpp
